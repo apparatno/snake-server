@@ -6,12 +6,13 @@ import (
 	"log"
 	"math/rand"
 	"net/http"
+	"strings"
 	"time"
 
 	uuid "github.com/satori/go.uuid"
 )
 
-const pixels = 225
+const pixels = 300
 const width = 20
 
 type session struct {
@@ -32,26 +33,36 @@ type server struct {
 	session *session
 }
 
+type gameData struct {
+	PlayerToken string `json:"playerToken"`
+}
+
+func setCors(w *http.ResponseWriter) {
+	(*w).Header().Set("Access-Control-Allow-Origin", "*")
+	(*w).Header().Set("Access-Control-Allow-Methods", "POST, GET, OPTIONS, PUT, DELETE")
+	(*w).Header().Set("Access-Control-Allow-Headers", "Accept, Content-Type, Content-Length, Accept-Encoding, X-CSRF-Token, Authorization")
+}
 func main() {
 	log.Println("SNAKES ON A MOTHERFUCKING PLATE GETTING IT ON")
 	s := server{}
 	mux := http.NewServeMux()
 	mux.HandleFunc("/state", func(w http.ResponseWriter, r *http.Request) {
+		setCors(&w)
 		currentState := State{}
 		if s.session != nil {
 			currentState.Status = "playing"
 		}
+		w.Header().Add("Content-Type", "application/json")
 		if err := json.NewEncoder(w).Encode(&currentState); err != nil {
 			log.Println(err)
 		}
 	})
 	mux.HandleFunc("/play", func(w http.ResponseWriter, r *http.Request) {
-		type newGameResponse struct {
-			PlayerToken string
-		}
+		setCors(&w)
 		if r.Method != http.MethodPost {
 			w.WriteHeader(http.StatusBadRequest)
 			w.Write([]byte("method not supported"))
+			return
 		}
 		if s.session != nil {
 			w.WriteHeader(http.StatusBadRequest)
@@ -61,11 +72,14 @@ func main() {
 
 		s.session = newSession()
 		w.Header().Add("Content-Type", "application/json")
-		res := newGameResponse{PlayerToken: s.session.token}
-		json.NewEncoder(w).Encode(&res)
+		res := gameData{PlayerToken: s.session.token}
+		if err := json.NewEncoder(w).Encode(&res); err != nil {
+			log.Println(err)
+		}
 		log.Println("new game started")
 	})
 	mux.HandleFunc("/screen", func(w http.ResponseWriter, r *http.Request) {
+		setCors(&w)
 		if r.Method != http.MethodGet {
 			w.WriteHeader(http.StatusBadRequest)
 			_, _ = w.Write([]byte("method not supported"))
@@ -84,17 +98,25 @@ func main() {
 		}
 	})
 	mux.HandleFunc("/action", func(w http.ResponseWriter, r *http.Request) {
+		setCors(&w)
 		if r.Method != http.MethodPost {
 			w.WriteHeader(http.StatusBadRequest)
 			_, _ = w.Write([]byte("method not supported"))
 			return
 		}
-		token := r.FormValue("playerToken")
-		if token != s.session.token {
+		var d gameData
+		if err := json.NewDecoder(r.Body).Decode(&d); err != nil {
+			w.WriteHeader(http.StatusBadRequest)
+			_, _ = w.Write([]byte("failed to decode data: " + err.Error()))
+			return
+		}
+		if d.PlayerToken != s.session.token {
 			w.WriteHeader(http.StatusForbidden)
-			w.Write([]byte("token '" + token + "' does not match current player token"))
+			w.Write([]byte("token '" + d.PlayerToken + "' does not match current player token"))
+			return
 		}
 		key := r.FormValue("keyPressed")
+		key = strings.ToUpper(key)
 		b, err := s.input(key)
 		if err != nil {
 			w.WriteHeader(http.StatusBadRequest)
@@ -137,7 +159,6 @@ func (s *server) getBoard() ([]byte, error) {
 	}
 
 	b := boardAsBytes(s.session.snek, s.session.fruit)
-	log.Printf("board %#v", b)
 	return b, nil
 }
 
@@ -215,7 +236,7 @@ func placeFruit(snek []int) int {
 }
 
 func gameLoop(s *server) {
-	t := time.NewTicker(time.Millisecond * 250)
+	t := time.NewTicker(time.Millisecond * 1000)
 	var waitCyclesToPlaceFruit int
 	for {
 		select {
