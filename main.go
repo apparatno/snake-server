@@ -1,28 +1,31 @@
 package main
 
 import (
+	"encoding/json"
 	"errors"
-	"io/ioutil"
 	"log"
 	"math/rand"
 	"net/http"
 	"time"
+
+	uuid "github.com/satori/go.uuid"
 )
 
 const pixels = 225
-
-type pixel struct {
-	direction string
-	fruit     bool
-}
+const width = 20
 
 type session struct {
-	board            []pixel
+	snek             []int
 	tip              int
 	length           int
 	currentDirection string
 	fruit            int
-	eatedAFruit      bool
+	token            string
+}
+
+type State struct {
+	Status string `json:"status"`
+	Token  string `json:"token"`
 }
 
 type server struct {
@@ -33,21 +36,76 @@ func main() {
 	log.Println("SNAKES ON A MOTHERFUCKING PLATE GETTING IT ON")
 	s := server{}
 	mux := http.NewServeMux()
+	mux.HandleFunc("/state", func(w http.ResponseWriter, r *http.Request) {
+		currentState := State{}
+		if s.session != nil {
+			currentState.Status = "playing"
+		}
+		if err := json.NewEncoder(w).Encode(&currentState); err != nil {
+			log.Println(err)
+		}
+	})
+	mux.HandleFunc("/play", func(w http.ResponseWriter, r *http.Request) {
+		type newGameResponse struct {
+			PlayerToken string
+		}
+		if r.Method != http.MethodPost {
+			w.WriteHeader(http.StatusBadRequest)
+			w.Write([]byte("method not supported"))
+		}
+		if s.session != nil {
+			w.WriteHeader(http.StatusBadRequest)
+			w.Write([]byte("game already running"))
+			return
+		}
+
+		s.session = newSession()
+		w.Header().Add("Content-Type", "application/json")
+		res := newGameResponse{PlayerToken: s.session.token}
+		json.NewEncoder(w).Encode(&res)
+		log.Println("new game started")
+	})
 	mux.HandleFunc("/screen", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
 			w.WriteHeader(http.StatusBadRequest)
 			_, _ = w.Write([]byte("method not supported"))
 			return
 		}
-		s.getBoard(w, r)
+		b, err := s.getBoard()
+		if err != nil {
+			w.WriteHeader(http.StatusBadRequest)
+			w.Write([]byte(err.Error())) // TODO return a fancy screen here
+			return
+		}
+		_, err = w.Write(b)
+		if err != nil {
+			log.Println(err)
+			w.WriteHeader(http.StatusInternalServerError)
+		}
 	})
 	mux.HandleFunc("/action", func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodPut {
+		if r.Method != http.MethodPost {
 			w.WriteHeader(http.StatusBadRequest)
 			_, _ = w.Write([]byte("method not supported"))
 			return
 		}
-		s.input(w, r)
+		token := r.FormValue("playerToken")
+		if token != s.session.token {
+			w.WriteHeader(http.StatusForbidden)
+			w.Write([]byte("token '" + token + "' does not match current player token"))
+		}
+		key := r.FormValue("keyPressed")
+		b, err := s.input(key)
+		if err != nil {
+			w.WriteHeader(http.StatusBadRequest)
+			w.Write([]byte(err.Error())) // TODO return a fancy screen here
+			return
+		}
+		_, err = w.Write(b)
+		if err != nil {
+			log.Println(err)
+			w.WriteHeader(http.StatusInternalServerError)
+		}
 	})
 
 	go gameLoop(&s)
@@ -58,65 +116,40 @@ func main() {
 }
 
 func newSession() *session {
-	board := make([]pixel, 225)
-	board[110] = pixel{direction: "R"}
-	board[111] = pixel{direction: "R"}
-	board[112] = pixel{direction: "R"}
-	f := placeFruit(board)
+	snek := []int{112, 111, 110}
+	f := placeFruit(snek)
+
+	token := uuid.NewV4().String()
 
 	sess := session{
-		board:            board,
-		tip:              112,
-		length:           3,
+		snek:             snek,
+		tip:              snek[0],
 		currentDirection: "R",
 		fruit:            f,
+		token:            token,
 	}
 	return &sess
 }
 
-func (s *server) getBoard(w http.ResponseWriter, r *http.Request) {
+func (s *server) getBoard() ([]byte, error) {
 	if s.session == nil {
-		w.WriteHeader(http.StatusBadRequest)
-		w.Write([]byte("no game")) // TODO return a fancy screen here
-		return
+		return nil, errors.New("no game")
 	}
 
-	b := boardAsBytes(s.session.board, s.session.fruit)
+	b := boardAsBytes(s.session.snek, s.session.fruit)
 	log.Printf("board %#v", b)
-
-	_, err := w.Write(b)
-	if err != nil {
-		log.Println(err)
-		w.WriteHeader(http.StatusInternalServerError)
-	}
+	return b, nil
 }
 
-func (s *server) input(w http.ResponseWriter, r *http.Request) {
-	by, err := ioutil.ReadAll(r.Body)
-	if err != nil {
+func (s *server) input(cmd string) ([]byte, error) {
+	if err := s.updateBoard(cmd); err != nil {
 		log.Println(err)
-		w.WriteHeader(http.StatusInternalServerError)
-		_, _ = w.Write([]byte("failed to read body"))
-		return
+		return nil, err
 	}
 
-	cmd := string(by)
-	if err = s.updateBoard(cmd); err != nil {
-		log.Println(err)
-		w.WriteHeader(http.StatusBadRequest)
-		_, err = w.Write([]byte("failed to update: " + err.Error()))
-		if err != nil {
-			log.Println(err)
-		}
-		return
-	}
+	b := boardAsBytes(s.session.snek, s.session.fruit)
 
-	b := boardAsBytes(s.session.board, s.session.fruit)
-
-	w.Header().Add("Content-Type", "text")
-	if _, err = w.Write(b); err != nil {
-		log.Println(err)
-	}
+	return b, nil
 }
 
 func (s *server) updateBoard(cmd string) error {
@@ -125,6 +158,7 @@ func (s *server) updateBoard(cmd string) error {
 		return nil
 	}
 
+	log.Printf("updating board with command %s", cmd)
 	switch cmd {
 	case "U":
 		if s.session.currentDirection == "U" || s.session.currentDirection == "D" {
@@ -149,83 +183,109 @@ func (s *server) updateBoard(cmd string) error {
 	return nil
 }
 
-func boardAsBytes(board []pixel, fruit int) []byte {
+func boardAsBytes(snek []int, fruit int) []byte {
 	b := make([]byte, pixels)
-	for i := range board {
+	for i := range b {
 		b[i] = byte('0')
-		if board[i].direction != "" {
-			b[i] = byte('1')
-		}
+	}
+	for _, s := range snek {
+		b[s] = byte('1')
 	}
 	b[fruit] = byte('2')
 
 	return b
 }
 
-func placeFruit(b []pixel) int {
+func placeFruit(snek []int) int {
 	var i int
 	for {
 		i = rand.Intn(pixels)
-		if b[i].direction == "" {
+		var inUse bool
+		for _, n := range snek {
+			if n == i {
+				inUse = true
+				break
+			}
+		}
+		if !inUse {
+			log.Printf("placed fruit at %d", i)
 			return i
 		}
 	}
 }
 
 func gameLoop(s *server) {
-	t := time.NewTicker(time.Millisecond * 50)
+	t := time.NewTicker(time.Millisecond * 250)
+	var waitCyclesToPlaceFruit int
 	for {
 		select {
 		case <-t.C:
 			if s.session == nil {
 				continue
 			}
+			log.Println("tick...")
 
-			var ateFruit bool
+			nextPixel := calculateNextPixel(s.session.snek, s.session.currentDirection)
 
-			board := s.session.board
-			buf := make([]pixel, pixels)
-			for i, p := range s.session.board {
-				switch p.direction {
-				case "U":
-					x := (i - 15) % pixels
-					buf[x] = p
-					if board[x].fruit {
-						ateFruit = true
-					}
-					if board[i+15].direction == "" && ateFruit {
-						buf[i] = p
-					}
-				case "D":
-					x := (i + 15) % pixels
-					buf[x] = p
-					if board[x].fruit {
-						ateFruit = true
-					}
-					if board[i-15].direction == "" && ateFruit {
-						buf[i] = p
-					}
-				case "L":
-					x := (i - 1) % pixels
-					buf[x] = p
-					if board[x].fruit {
-						ateFruit = true
-					}
-					if board[i+1].direction == "" && ateFruit {
-						buf[i] = p
-					}
-				case "R":
-					x := (i + 1) % pixels
-					buf[x] = p
-					if board[x].fruit {
-						ateFruit = true
-					}
-					if board[i-1].direction == "" && ateFruit {
-						buf[i] = p
-					}
+			log.Printf("next pixel is %d", nextPixel)
+
+			snek := make([]int, 1, len(s.session.snek))
+			snek[0] = nextPixel
+			snek = append(snek, s.session.snek[:len(s.session.snek)-1]...)
+
+			log.Printf("snake was %#v", s.session.snek)
+			log.Printf("snake is  %#v", snek)
+
+			// Keep the last snake pixel if it ate a fruit
+			if s.session.fruit == nextPixel {
+				log.Printf("snake ate fruit at %d", nextPixel)
+				snek = append(snek, s.session.snek[len(s.session.snek)-1])
+				s.session.fruit = -1 // delete the fruit
+				waitCyclesToPlaceFruit = rand.Intn(10) + 1
+				log.Printf("wait for %d cycles to place new fruit", waitCyclesToPlaceFruit)
+			}
+
+			s.session.snek = snek
+
+			// count down to place new fruit
+			if s.session.fruit == -1 {
+				log.Printf("there is no fruit")
+				waitCyclesToPlaceFruit--
+				if waitCyclesToPlaceFruit == 0 {
+					s.session.fruit = placeFruit(snek)
+					log.Printf("dropped fruit at %d", s.session.fruit)
 				}
 			}
-			s.session.board = buf
+
 		}
 	}
+}
+
+func calculateNextPixel(snake []int, direction string) int {
+	currentPixel := snake[0]
+	var nextPixel int
+
+	switch direction {
+	case "U":
+		nextPixel = currentPixel - width
+		if nextPixel < 0 {
+			nextPixel += pixels
+		}
+	case "D":
+		nextPixel = currentPixel + width
+		if nextPixel > pixels {
+			nextPixel -= pixels
+		}
+	case "L":
+		nextPixel = currentPixel - 1
+		if currentPixel%width == 0 {
+			nextPixel = nextPixel + width
+		}
+	case "R":
+		nextPixel = currentPixel + 1
+		if nextPixel%width == 0 {
+			nextPixel = nextPixel - width
+		}
+	}
+	return nextPixel
 }
