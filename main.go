@@ -225,40 +225,44 @@ func gameLoop(s *server) {
 			}
 			log.Println("tick...")
 
-			nextPixel := calculateNextPixel(s.session.snek, s.session.currentDirection)
-
-			log.Printf("next pixel is %d", nextPixel)
-
-			snek := make([]int, 1, len(s.session.snek))
-			snek[0] = nextPixel
-			snek = append(snek, s.session.snek[:len(s.session.snek)-1]...)
+			snake := moveMotherfuckingSnake(s.session.snek, s.session.currentDirection)
 
 			log.Printf("snake was %#v", s.session.snek)
-			log.Printf("snake is  %#v", snek)
+			log.Printf("snake is  %#v", snake)
 
 			// Keep the last snake pixel if it ate a fruit
-			if s.session.fruit == nextPixel {
-				log.Printf("snake ate fruit at %d", nextPixel)
-				snek = append(snek, s.session.snek[len(s.session.snek)-1])
+			if s.session.fruit == snake[0] {
+				log.Printf("snake ate fruit at %d", snake[0])
+				snake = append(snake, s.session.snek[len(s.session.snek)-1])
 				s.session.fruit = -1 // delete the fruit
 				waitCyclesToPlaceFruit = rand.Intn(10) + 1
 				log.Printf("wait for %d cycles to place new fruit", waitCyclesToPlaceFruit)
 			}
 
-			s.session.snek = snek
+			s.session.snek = snake
 
 			// count down to place new fruit
 			if s.session.fruit == -1 {
 				log.Printf("there is no fruit")
 				waitCyclesToPlaceFruit--
 				if waitCyclesToPlaceFruit == 0 {
-					s.session.fruit = placeFruit(snek)
+					s.session.fruit = placeFruit(snake)
 					log.Printf("dropped fruit at %d", s.session.fruit)
 				}
 			}
 
 		}
 	}
+}
+
+func moveMotherfuckingSnake(snake []int, direction string) []int {
+	nextPixel := calculateNextPixel(snake, direction)
+
+	snek := make([]int, 1, len(snake))
+	snek[0] = nextPixel
+	snek = append(snek, snake[:len(snake)-1]...)
+
+	return snek
 }
 
 func calculateNextPixel(snake []int, direction string) int {

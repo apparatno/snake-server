@@ -1,6 +1,7 @@
 package main
 
 import (
+	"reflect"
 	"testing"
 )
 
@@ -70,6 +71,74 @@ func TestCalculateNextPixel(t *testing.T) {
 				t.Errorf("want %d got %d", tt.want, res)
 			}
 
+		})
+	}
+}
+
+func Test_moveMotherfuckingSnake(t *testing.T) {
+	type args struct {
+		snake     []int
+		direction string
+	}
+	tests := []struct {
+		name string
+		args args
+		want []int
+	}{
+		{
+			name: "moves left",
+			args: args{
+				snake:     []int{110, 111, 112},
+				direction: "L",
+			},
+			want: []int{109, 110, 111},
+		},
+		{
+			name: "moves right",
+			args: args{
+				snake:     []int{112, 111, 110},
+				direction: "R",
+			},
+			want: []int{113, 112, 111},
+		},
+		{
+			name: "going left turns up",
+			args: args{
+				snake:     []int{110, 111, 112},
+				direction: "U",
+			},
+			want: []int{90, 110, 111},
+		},
+		{
+			name: "going left turns down",
+			args: args{
+				snake:     []int{110, 111, 112},
+				direction: "D",
+			},
+			want: []int{130, 110, 111},
+		},
+		{
+			name: "going right turns up",
+			args: args{
+				snake:     []int{112, 111, 110},
+				direction: "U",
+			},
+			want: []int{92, 112, 111},
+		},
+		{
+			name: "going right turns down",
+			args: args{
+				snake:     []int{112, 111, 110},
+				direction: "D",
+			},
+			want: []int{132, 112, 111},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := moveMotherfuckingSnake(tt.args.snake, tt.args.direction); !reflect.DeepEqual(got, tt.want) {
+				t.Errorf("moveMotherfuckingSnake() = %v, want %v", got, tt.want)
+			}
 		})
 	}
 }
