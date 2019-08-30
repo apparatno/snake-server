@@ -31,9 +31,7 @@ type State struct {
 }
 
 type server struct {
-	session  *session
-	ballPosX int
-	ballDir  int
+	session *session
 }
 
 type gameData struct {
@@ -48,7 +46,7 @@ func setCors(w *http.ResponseWriter) {
 func main() {
 	log.Println("SNAKES ON A MOTHERFUCKING PLATE GETTING IT ON")
 
-	s := server{ballPosX: 3, ballDir: 1}
+	s := server{}
 	mux := http.NewServeMux()
 	mux.HandleFunc("/state", func(w http.ResponseWriter, r *http.Request) {
 		setCors(&w)
@@ -89,8 +87,14 @@ func main() {
 			_, _ = w.Write([]byte("method not supported"))
 			return
 		}
-		b, _ := s.getBoard()
-		_, err := w.Write(b)
+		b, err := s.getBoard()
+		if err != nil {
+			// error means no board means game over
+			w.WriteHeader(http.StatusNotFound)
+			w.Write([]byte(err.Error()))
+		}
+
+		_, err = w.Write(b)
 		if err != nil {
 			log.Println(err)
 			w.WriteHeader(http.StatusInternalServerError)
@@ -159,7 +163,7 @@ func newSession() *session {
 
 func (s *server) getBoard() ([]byte, error) {
 	if s.session == nil {
-		return getDefaultBoard(s.ballPosX), nil
+		return nil, errors.New("game over")
 	}
 
 	b := boardAsBytes(s.session.snek, s.session.fruit)
@@ -249,24 +253,14 @@ func placeFruit(snek []int, r *rand.Rand) int {
 }
 
 func gameLoop(s *server) {
-	t := time.NewTicker(time.Millisecond * 50)
+	t := time.NewTicker(time.Millisecond * 500)
 	var waitCyclesToPlaceFruit int
-	var frameSkipper int
 	for {
 		select {
 		case <-t.C:
 			if s.session == nil {
-				s.ballPosX += s.ballDir
-				if s.ballPosX > 17 || s.ballPosX < 4 {
-					s.ballDir *= -1
-				}
 				continue
 			}
-			if frameSkipper < 10 {
-				frameSkipper++
-				continue
-			}
-			frameSkipper = 0
 
 			snake := moveMotherfuckingSnake(s.session.snek, s.session.currentDirection)
 
@@ -346,12 +340,14 @@ func getDefaultBoard(ballPos int) []byte {
 	}
 	b = byte('1')
 
-	for x := ballPos; x < ballPos+3; x++ {
-		for y := 6; y < 10; y++ {
-			p := x + width*y
-			//log.Printf("%d + %d x %d = %d", x, width, j, p)
-			bo[p] = b
+	bo[ballPos] = b
+	for j := ballPos - 1; j <= ballPos+1; j++ {
+		for k := -1; k <= 1; k++ {
+			x := k*width + j
+			log.Printf("%d x width + %d = %d", k, j, x)
+			bo[x] = b
 		}
 	}
+
 	return bo
 }
