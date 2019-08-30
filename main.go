@@ -14,6 +14,7 @@ import (
 
 const pixels = 300
 const width = 20
+const defaultTTL = 20 // inactivity for this many game loops kills the session
 
 type session struct {
 	snek             []int
@@ -21,6 +22,7 @@ type session struct {
 	fruit            int
 	token            string
 	randomizer       *rand.Rand
+	ttl              int
 }
 
 type State struct {
@@ -149,6 +151,7 @@ func newSession() *session {
 		fruit:            f,
 		token:            token,
 		randomizer:       randomizer,
+		ttl:              defaultTTL,
 	}
 	log.Printf("created new session %#v", sess)
 	return &sess
@@ -202,6 +205,7 @@ func (s *server) updateBoard(cmd string) error {
 		return errors.New("unknown command " + cmd)
 	}
 	s.session.currentDirection = cmd
+	s.session.ttl = defaultTTL
 	return nil
 }
 
@@ -287,6 +291,10 @@ func gameLoop(s *server) {
 				}
 			}
 
+			s.session.ttl--
+			if s.session.ttl == 0 {
+				s.session = nil // killing the session for inactivity
+			}
 		}
 	}
 }
