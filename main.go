@@ -17,11 +17,10 @@ const width = 20
 
 type session struct {
 	snek             []int
-	tip              int
-	length           int
 	currentDirection string
 	fruit            int
 	token            string
+	randomizer       *rand.Rand
 }
 
 type State struct {
@@ -30,7 +29,9 @@ type State struct {
 }
 
 type server struct {
-	session *session
+	session  *session
+	ballPosX int
+	ballDir  int
 }
 
 type gameData struct {
@@ -44,7 +45,8 @@ func setCors(w *http.ResponseWriter) {
 }
 func main() {
 	log.Println("SNAKES ON A MOTHERFUCKING PLATE GETTING IT ON")
-	s := server{}
+
+	s := server{ballPosX: 3, ballDir: 1}
 	mux := http.NewServeMux()
 	mux.HandleFunc("/state", func(w http.ResponseWriter, r *http.Request) {
 		setCors(&w)
@@ -85,13 +87,8 @@ func main() {
 			_, _ = w.Write([]byte("method not supported"))
 			return
 		}
-		b, err := s.getBoard()
-		if err != nil {
-			w.WriteHeader(http.StatusBadRequest)
-			w.Write([]byte(err.Error())) // TODO return a fancy screen here
-			return
-		}
-		_, err = w.Write(b)
+		b, _ := s.getBoard()
+		_, err := w.Write(b)
 		if err != nil {
 			log.Println(err)
 			w.WriteHeader(http.StatusInternalServerError)
@@ -115,13 +112,14 @@ func main() {
 		if playerToken != s.session.token {
 			w.WriteHeader(http.StatusForbidden)
 			w.Write([]byte("token '" + playerToken + "' does not match current player token"))
+
 			return
 		}
 		key := strings.ToUpper(keyPressed)
 		b, err := s.input(key)
 		if err != nil {
 			w.WriteHeader(http.StatusBadRequest)
-			w.Write([]byte(err.Error())) // TODO return a fancy screen here
+			_, _ = w.Write([]byte(err.Error())) // TODO return a fancy screen here
 			return
 		}
 		_, err = w.Write(b)
@@ -139,24 +137,26 @@ func main() {
 }
 
 func newSession() *session {
+	randomizer := makeRandomizer()
 	snek := []int{112, 111, 110}
-	f := placeFruit(snek)
+	f := placeFruit(snek, randomizer)
 
 	token := uuid.NewV4().String()
 
 	sess := session{
 		snek:             snek,
-		tip:              snek[0],
 		currentDirection: "R",
 		fruit:            f,
 		token:            token,
+		randomizer:       randomizer,
 	}
+	log.Printf("created new session %#v", sess)
 	return &sess
 }
 
 func (s *server) getBoard() ([]byte, error) {
 	if s.session == nil {
-		return nil, errors.New("no game")
+		return getDefaultBoard(s.ballPosX), nil
 	}
 
 	b := boardAsBytes(s.session.snek, s.session.fruit)
@@ -213,15 +213,23 @@ func boardAsBytes(snek []int, fruit int) []byte {
 	for _, s := range snek {
 		b[s] = byte('1')
 	}
-	b[fruit] = byte('2')
+	if fruit >= 0 {
+		b[fruit] = byte('2')
+	}
 
 	return b
 }
 
-func placeFruit(snek []int) int {
+func makeRandomizer() *rand.Rand {
+	s := rand.NewSource(time.Now().Unix())
+	return rand.New(s)
+}
+
+func placeFruit(snek []int, r *rand.Rand) int {
+	log.Println("placing a fruit")
 	var i int
 	for {
-		i = rand.Intn(pixels)
+		i = r.Intn(pixels)
 		var inUse bool
 		for _, n := range snek {
 			if n == i {
@@ -237,27 +245,33 @@ func placeFruit(snek []int) int {
 }
 
 func gameLoop(s *server) {
-	t := time.NewTicker(time.Millisecond * 500)
+	t := time.NewTicker(time.Millisecond * 50)
 	var waitCyclesToPlaceFruit int
+	var frameSkipper int
 	for {
 		select {
 		case <-t.C:
 			if s.session == nil {
+				s.ballPosX += s.ballDir
+				if s.ballPosX > 17 || s.ballPosX < 4 {
+					s.ballDir *= -1
+				}
 				continue
 			}
-			log.Println("tick...")
+			if frameSkipper < 10 {
+				frameSkipper++
+				continue
+			}
+			frameSkipper = 0
 
 			snake := moveMotherfuckingSnake(s.session.snek, s.session.currentDirection)
-
-			log.Printf("snake was %#v", s.session.snek)
-			log.Printf("snake is  %#v", snake)
 
 			// Keep the last snake pixel if it ate a fruit
 			if s.session.fruit == snake[0] {
 				log.Printf("snake ate fruit at %d", snake[0])
 				snake = append(snake, s.session.snek[len(s.session.snek)-1])
 				s.session.fruit = -1 // delete the fruit
-				waitCyclesToPlaceFruit = rand.Intn(10) + 1
+				waitCyclesToPlaceFruit = s.session.randomizer.Intn(10) + 1
 				log.Printf("wait for %d cycles to place new fruit", waitCyclesToPlaceFruit)
 			}
 
@@ -268,7 +282,7 @@ func gameLoop(s *server) {
 				log.Printf("there is no fruit")
 				waitCyclesToPlaceFruit--
 				if waitCyclesToPlaceFruit == 0 {
-					s.session.fruit = placeFruit(snake)
+					s.session.fruit = placeFruit(snake, s.session.randomizer)
 					log.Printf("dropped fruit at %d", s.session.fruit)
 				}
 			}
@@ -314,4 +328,22 @@ func calculateNextPixel(snake []int, direction string) int {
 		}
 	}
 	return nextPixel
+}
+
+func getDefaultBoard(ballPos int) []byte {
+	b := byte('0')
+	bo := make([]byte, pixels)
+	for i := range bo {
+		bo[i] = b
+	}
+	b = byte('1')
+
+	for x := ballPos; x < ballPos+3; x++ {
+		for y := 6; y < 10; y++ {
+			p := x + width*y
+			//log.Printf("%d + %d x %d = %d", x, width, j, p)
+			bo[p] = b
+		}
+	}
+	return bo
 }
