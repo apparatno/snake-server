@@ -262,7 +262,11 @@ func gameLoop(s *server) {
 				continue
 			}
 
-			snake := moveMotherfuckingSnake(s.session.snek, s.session.currentDirection)
+			snake, err := moveMotherfuckingSnake(s.session.snek, s.session.currentDirection)
+			if err != nil {
+				// error means snake collided with something - game over
+				s.session = nil
+			}
 
 			// Keep the last snake pixel if it ate a fruit
 			if s.session.fruit == snake[0] {
@@ -293,14 +297,27 @@ func gameLoop(s *server) {
 	}
 }
 
-func moveMotherfuckingSnake(snake []int, direction string) []int {
+func moveMotherfuckingSnake(snake []int, direction string) ([]int, error) {
 	nextPixel := calculateNextPixel(snake, direction)
 
 	snek := make([]int, 1, len(snake))
 	snek[0] = nextPixel
 	snek = append(snek, snake[:len(snake)-1]...)
 
-	return snek
+	if collides(snek) {
+		return nil, errors.New("game over")
+	}
+
+	return snek, nil
+}
+
+func collides(snake []int) bool {
+	for _, s := range snake[1:] {
+		if s == snake[0] {
+			return true
+		}
+	}
+	return false
 }
 
 func calculateNextPixel(snake []int, direction string) int {
