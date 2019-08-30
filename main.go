@@ -104,19 +104,20 @@ func main() {
 			_, _ = w.Write([]byte("method not supported"))
 			return
 		}
-		var d gameData
-		if err := json.NewDecoder(r.Body).Decode(&d); err != nil {
+
+		if err := r.ParseForm(); err != nil {
 			w.WriteHeader(http.StatusBadRequest)
-			_, _ = w.Write([]byte("failed to decode data: " + err.Error()))
+			_, _ = w.Write([]byte("failed to parse form data: " + err.Error()))
 			return
 		}
-		if d.PlayerToken != s.session.token {
+		playerToken := r.Form.Get("playerToken")
+		keyPressed := r.Form.Get("keyPressed")
+		if playerToken != s.session.token {
 			w.WriteHeader(http.StatusForbidden)
-			w.Write([]byte("token '" + d.PlayerToken + "' does not match current player token"))
+			w.Write([]byte("token '" + playerToken + "' does not match current player token"))
 			return
 		}
-		key := r.FormValue("keyPressed")
-		key = strings.ToUpper(key)
+		key := strings.ToUpper(keyPressed)
 		b, err := s.input(key)
 		if err != nil {
 			w.WriteHeader(http.StatusBadRequest)
@@ -132,7 +133,7 @@ func main() {
 
 	go gameLoop(&s)
 
-	if err := http.ListenAndServe(":8080", mux); err != nil {
+	if err := http.ListenAndServe(":8081", mux); err != nil {
 		log.Println(err)
 	}
 }
@@ -236,7 +237,7 @@ func placeFruit(snek []int) int {
 }
 
 func gameLoop(s *server) {
-	t := time.NewTicker(time.Millisecond * 1000)
+	t := time.NewTicker(time.Millisecond * 500)
 	var waitCyclesToPlaceFruit int
 	for {
 		select {
