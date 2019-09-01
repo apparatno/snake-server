@@ -33,7 +33,7 @@ The values can be parsed as:
 If the request returns status `HTTP/404`
 it means the game is over.
 
-**POST /play`**
+**`POST /play`**
 
 Starts a new game.
 The response returns a JSON document
