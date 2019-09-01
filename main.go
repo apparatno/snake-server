@@ -266,6 +266,7 @@ func gameLoop(s *server) {
 			if err != nil {
 				// error means snake collided with something - game over
 				s.session = nil
+				continue
 			}
 
 			// Keep the last snake pixel if it ate a fruit
