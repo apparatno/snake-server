@@ -138,7 +138,7 @@ func main() {
 
 	go gameLoop(&s)
 
-	if err := http.ListenAndServe(":8081", mux); err != nil {
+	if err := http.ListenAndServe(":8080", mux); err != nil {
 		log.Println(err)
 	}
 }
