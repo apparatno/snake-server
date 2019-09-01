@@ -14,7 +14,7 @@ import (
 
 const pixels = 300
 const width = 20
-const defaultTTL = 20 // inactivity for this many game loops kills the session
+const defaultTTL = 100 // inactivity for this many game loops kills the session
 
 type session struct {
 	snek             []int
@@ -90,6 +90,7 @@ func main() {
 		b, err := s.getBoard()
 		if err != nil {
 			// error means no board means game over
+			log.Printf("err %v", err)
 			w.WriteHeader(http.StatusNotFound)
 			w.Write([]byte(err.Error()))
 		}
@@ -292,6 +293,7 @@ func gameLoop(s *server) {
 
 			s.session.ttl--
 			if s.session.ttl == 0 {
+				log.Println("zombie game - killing it")
 				s.session = nil // killing the session for inactivity
 			}
 		}
@@ -306,6 +308,7 @@ func moveMotherfuckingSnake(snake []int, direction string) ([]int, error) {
 	snek = append(snek, snake[:len(snake)-1]...)
 
 	if collides(snek) {
+		log.Printf("snake collided %#v", snek)
 		return nil, errors.New("game over")
 	}
 
@@ -315,6 +318,7 @@ func moveMotherfuckingSnake(snake []int, direction string) ([]int, error) {
 func collides(snake []int) bool {
 	for _, s := range snake[1:] {
 		if s == snake[0] {
+			log.Printf("%d collided with %d (%#v)", s, snake[0], snake)
 			return true
 		}
 	}
