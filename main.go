@@ -22,6 +22,7 @@ type fruit struct {
 	maxPlacementWaitCycle int
 	consumed              bool
 	variant               byte
+	points                int
 }
 
 type session struct {
@@ -31,11 +32,17 @@ type session struct {
 	randomizer       *rand.Rand
 	ttl              int
 	fruits           []fruit
+	totalPoints      int
 }
 
 type state struct {
 	Status string `json:"status"`
 	Token  string `json:"token"`
+}
+
+type gameState struct {
+	Board  string `json:"board"`
+	Points int    `json:"points"`
 }
 
 type server struct {
@@ -56,6 +63,33 @@ func main() {
 
 	s := server{}
 	mux := http.NewServeMux()
+
+	mux.HandleFunc("/gamestate", func(w http.ResponseWriter, r *http.Request) {
+		setCors(&w)
+		if r.Method != http.MethodGet {
+			w.WriteHeader(http.StatusBadRequest)
+			_, _ = w.Write([]byte("method not supported"))
+			return
+		}
+		board, err := s.getBoard()
+		if err != nil {
+			// error means no board means game over
+			log.Printf("err %v", err)
+			w.WriteHeader(http.StatusNotFound)
+			w.Write([]byte(err.Error()))
+		}
+
+		points := s.session.totalPoints
+		gameState := gameState{
+			Board:  string(board),
+			Points: points,
+		}
+
+		if err := json.NewEncoder(w).Encode(&gameState); err != nil {
+			log.Println(err)
+		}
+	})
+
 	mux.HandleFunc("/state", func(w http.ResponseWriter, r *http.Request) {
 		setCors(&w)
 		currentState := state{}
@@ -160,11 +194,13 @@ func newSession() *session {
 		fruit{
 			position:              placeFruit(snek, randomizer),
 			maxPlacementWaitCycle: 10,
+			points:                10,
 			variant:               '2',
 		},
 		fruit{
 			position:              placeFruit(snek, randomizer),
 			maxPlacementWaitCycle: 15,
+			points:                20,
 			variant:               '3',
 		},
 	}
@@ -309,6 +345,7 @@ func gameLoop(s *server) {
 				fruit.position = placeFruit(snake, s.session.randomizer)
 
 				s.session.fruits[fruitIdx] = fruit
+				s.session.totalPoints += fruit.points
 				snake = append(snake, s.session.snek[len(s.session.snek)-1])
 			}
 
