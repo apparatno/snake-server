@@ -75,6 +75,47 @@ func TestCalculateNextPixel(t *testing.T) {
 	}
 }
 
+func Test_consumedFruit(t *testing.T) {
+	consumeAtIndex := 1
+	fruits := []fruit{
+		fruit{
+			position: consumeAtIndex,
+		},
+	}
+
+	type arg struct {
+		snekHeadPosition int
+		fruits           []fruit
+	}
+
+	tests := []struct {
+		name string
+		args arg
+		want bool
+	}{
+		{
+			name: "consumed fruit if head at fruit",
+			want: true,
+			args: arg{
+				snekHeadPosition: consumeAtIndex,
+			},
+		},
+		{
+			name: "did not fruit if head at not fruit",
+			want: false,
+			args: arg{
+				snekHeadPosition: 999,
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		if got, _ := consumedFruit(tt.args.snekHeadPosition, fruits); got != tt.want {
+			t.Errorf("consumedFruit() = %v, want %v", got, tt.want)
+		}
+	}
+}
+
 func Test_moveMotherfuckingSnake(t *testing.T) {
 	type args struct {
 		snake     []int
@@ -136,7 +177,7 @@ func Test_moveMotherfuckingSnake(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := moveMotherfuckingSnake(tt.args.snake, tt.args.direction); !reflect.DeepEqual(got, tt.want) {
+			if got, _ := moveMotherfuckingSnake(tt.args.snake, tt.args.direction); !reflect.DeepEqual(got, tt.want) {
 				t.Errorf("moveMotherfuckingSnake() = %v, want %v", got, tt.want)
 			}
 		})
