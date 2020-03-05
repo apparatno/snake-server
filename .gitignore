@@ -1,2 +1,4 @@
 .idea
 snakeserver
+.vscode
+__debug_bin

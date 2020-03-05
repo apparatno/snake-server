@@ -16,16 +16,24 @@ const pixels = 300
 const width = 20
 const defaultTTL = 100 // inactivity for this many game loops kills the session
 
+type fruit struct {
+	position              int
+	placementWaitCycle    int
+	maxPlacementWaitCycle int
+	consumed              bool
+	variant               byte
+}
+
 type session struct {
 	snek             []int
 	currentDirection string
-	fruit            int
 	token            string
 	randomizer       *rand.Rand
 	ttl              int
+	fruits           []fruit
 }
 
-type State struct {
+type state struct {
 	Status string `json:"status"`
 	Token  string `json:"token"`
 }
@@ -50,7 +58,7 @@ func main() {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/state", func(w http.ResponseWriter, r *http.Request) {
 		setCors(&w)
-		currentState := State{}
+		currentState := state{}
 		if s.session != nil {
 			currentState.Status = "playing"
 		}
@@ -146,17 +154,28 @@ func main() {
 func newSession() *session {
 	randomizer := makeRandomizer()
 	snek := []int{112, 111, 110}
-	f := placeFruit(snek, randomizer)
 
 	token := uuid.NewV4().String()
+	fruits := []fruit{
+		fruit{
+			position:              placeFruit(snek, randomizer),
+			maxPlacementWaitCycle: 10,
+			variant:               '2',
+		},
+		fruit{
+			position:              placeFruit(snek, randomizer),
+			maxPlacementWaitCycle: 15,
+			variant:               '3',
+		},
+	}
 
 	sess := session{
 		snek:             snek,
 		currentDirection: "R",
-		fruit:            f,
 		token:            token,
 		randomizer:       randomizer,
 		ttl:              defaultTTL,
+		fruits:           fruits,
 	}
 	log.Printf("created new session %#v", sess)
 	return &sess
@@ -167,7 +186,7 @@ func (s *server) getBoard() ([]byte, error) {
 		return nil, errors.New("game over")
 	}
 
-	b := boardAsBytes(s.session.snek, s.session.fruit)
+	b := boardAsBytes(s.session.snek, s.session.fruits)
 	return b, nil
 }
 
@@ -177,8 +196,7 @@ func (s *server) input(cmd string) ([]byte, error) {
 		return nil, err
 	}
 
-	b := boardAsBytes(s.session.snek, s.session.fruit)
-
+	b := boardAsBytes(s.session.snek, s.session.fruits)
 	return b, nil
 }
 
@@ -214,7 +232,7 @@ func (s *server) updateBoard(cmd string) error {
 	return nil
 }
 
-func boardAsBytes(snek []int, fruit int) []byte {
+func boardAsBytes(snek []int, fruits []fruit) []byte {
 	b := make([]byte, pixels)
 	for i := range b {
 		b[i] = byte('0')
@@ -222,8 +240,11 @@ func boardAsBytes(snek []int, fruit int) []byte {
 	for _, s := range snek {
 		b[s] = byte('1')
 	}
-	if fruit >= 0 {
-		b[fruit] = byte('2')
+
+	for _, fruit := range fruits {
+		if !fruit.consumed {
+			b[fruit.position] = fruit.variant
+		}
 	}
 
 	return b
@@ -253,9 +274,17 @@ func placeFruit(snek []int, r *rand.Rand) int {
 	}
 }
 
+func consumedFruit(snekHeadPosition int, fruits []fruit) (bool, int) {
+	for i := range fruits {
+		if snekHeadPosition == fruits[i].position {
+			return true, i
+		}
+	}
+	return false, -1
+}
+
 func gameLoop(s *server) {
 	t := time.NewTicker(time.Millisecond * 500)
-	var waitCyclesToPlaceFruit int
 	for {
 		select {
 		case <-t.C:
@@ -270,26 +299,29 @@ func gameLoop(s *server) {
 				continue
 			}
 
-			// Keep the last snake pixel if it ate a fruit
-			if s.session.fruit == snake[0] {
-				log.Printf("snake ate fruit at %d", snake[0])
+			consumed, fruitIdx := consumedFruit(snake[0], s.session.fruits)
+			if consumed {
+				log.Printf("snake comsumed fruit at %d", snake[0])
+				fruit := s.session.fruits[fruitIdx]
+
+				fruit.consumed = true
+				fruit.placementWaitCycle = s.session.randomizer.Intn(fruit.maxPlacementWaitCycle) + 1
+				fruit.position = placeFruit(snake, s.session.randomizer)
+
+				s.session.fruits[fruitIdx] = fruit
 				snake = append(snake, s.session.snek[len(s.session.snek)-1])
-				s.session.fruit = -1 // delete the fruit
-				waitCyclesToPlaceFruit = s.session.randomizer.Intn(10) + 1
-				log.Printf("wait for %d cycles to place new fruit", waitCyclesToPlaceFruit)
+			}
+
+			for i, fruit := range s.session.fruits {
+				if fruit.consumed {
+					s.session.fruits[i].placementWaitCycle--
+					if fruit.placementWaitCycle == 0 {
+						s.session.fruits[i].consumed = false
+					}
+				}
 			}
 
 			s.session.snek = snake
-
-			// count down to place new fruit
-			if s.session.fruit == -1 {
-				log.Printf("there is no fruit")
-				waitCyclesToPlaceFruit--
-				if waitCyclesToPlaceFruit == 0 {
-					s.session.fruit = placeFruit(snake, s.session.randomizer)
-					log.Printf("dropped fruit at %d", s.session.fruit)
-				}
-			}
 
 			s.session.ttl--
 			if s.session.ttl == 0 {
